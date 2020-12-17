@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 from requests_html import HTMLSession
 
 
-class ProxyRequests:
+class ProxyRequests(object):
     def __init__(self):
         self.sockets = []
         self.acquire_sockets()
@@ -35,10 +35,159 @@ class ProxyRequests:
         return proxies
 
 
-class Form:
+class Form(object):
 
-    def __init__(self, form=None):
+    def __init__(self, form):
         self.form = form
+        self._submit_chosen = False
+        self.attach = self.set_input
+        self.input = self.set_input
+        self.textarea = self.set_textarea
+
+    def set_input(self, data):
+        for (name, value) in data.items():
+            i = self.form.find("input", {"name": name})
+            if not i:
+                return "No input field named " + name
+            i["value"] = value
+
+    def uncheck_all(self, name):
+        for option in self.form.find_all("input", {"name": name}):
+            if "checked" in option.attrs:
+                del option.attrs["checked"]
+
+    def check(self, data):
+        for (name, value) in data.items():
+            if not self.set_checkbox({name: value}, uncheck_other_boxes=False):
+                continue
+            if not self.set_radio({name: value}):
+                continue
+            return "No input checkbox/radio named " + name
+
+    def set_checkbox(self, data, uncheck_other_boxes=True):
+        for (name, value) in data.items():
+            checkboxes = self.find_by_type("input", "checkbox", {'name': name})
+            if not checkboxes:
+                return "No input checkbox named " + name
+
+            if uncheck_other_boxes:
+                self.uncheck_all(name)
+
+            if not isinstance(value, list) and not isinstance(value, tuple):
+                value = (value,)
+
+            for choice in value:
+                choice_str = str(choice)
+                for checkbox in checkboxes:
+                    if checkbox.attrs.get("value", "on") == choice_str:
+                        checkbox["checked"] = ""
+                        break
+                    elif choice is True:
+                        checkbox["checked"] = ""
+                        break
+                    elif choice is False:
+                        if "checked" in checkbox.attrs:
+                            del checkbox.attrs["checked"]
+                        break
+                else:
+                    return "No input checkbox named %s with choice %s" % (name, choice)
+
+    def set_radio(self, data):
+        for (name, value) in data.items():
+            radios = self.find_by_type("input", "radio", {'name': name})
+            if not radios:
+                return "No input radio named " + name
+
+            self.uncheck_all(name)
+
+            for radio in radios:
+                if radio.attrs.get("value", "on") == str(value):
+                    radio["checked"] = ""
+                    break
+            else:
+                return "No input radio named %s with choice %s" % (name, value)
+
+    def set_textarea(self, data):
+        for (name, value) in data.items():
+            t = self.form.find("textarea", {"name": name})
+            if not t:
+                return "No textarea named " + name
+            t.string = value
+
+    def set_select(self, data):
+        for (name, value) in data.items():
+            select = self.form.find("select", {"name": name})
+            if not select:
+                return "No select named " + name
+
+            for option in select.find_all("option"):
+                if "selected" in option.attrs:
+                    del option.attrs["selected"]
+
+            if not isinstance(value, list) and not isinstance(value, tuple):
+                value = (value,)
+            elif "multiple" not in select.attrs:
+                return "Cannot select multiple options!"
+
+            for choice in value:
+                option = select.find("option", {"value": choice})
+
+                if not option:
+                    option = select.find("option", string=choice)
+
+                if not option:
+                    return 'Option %s not found for select %s' % (choice, name)
+
+                option.attrs["selected"] = "selected"
+
+    def __setitem__(self, name, value):
+        return self.set(name, value)
+
+    def set(self, name, value, force=False):
+        for func in ("checkbox", "radio", "input", "textarea", "select"):
+            if not getattr(self, "set_" + func)({name: value}):
+                return
+        if force:
+            self.update_form('text', name, value=value)
+            return
+        return "No valid element named " + name
+
+    def choose_submit(self, submit):
+        if self._submit_chosen:
+            if submit is None:
+                return
+            else:
+                raise Exception('Submit already chosen. Cannot change submit!')
+
+        inps = (self.find_by_type("input", "submit", dict()) +
+                self.form.find_all("button"))
+        inps = [i for i in inps
+                if i.get('type', '').lower() not in ('button', 'reset')]
+
+        if submit is None and inps:
+            submit = inps[0]
+
+        found = False
+        for inp in inps:
+            if inp.has_attr('name') and inp['name'] == submit:
+                if found:
+                    return "Multiple submit elements match: {0}".format(submit)
+                found = True
+            elif inp == submit:
+                if found:
+                    del inp['name']
+                found = True
+            else:
+                del inp['name']
+
+        if not found and submit is not None:
+            return "Specified submit element not found: {0}".format(submit)
+        self._submit_chosen = True
+
+    def find_by_type(self, tag_name, type_attr, attrs):
+        attrs_dict = attrs.copy()
+        attrs_dict['type'] = lambda x: x and x.lower() == type_attr
+        return self.form.find_all(tag_name, attrs=attrs_dict)
 
     def update_form(self, type, name, value, **kwargs):
         old_input = self.form.find_all('input', {'name': name})
@@ -69,7 +218,7 @@ class Form:
                 print(input_copy)
 
 
-class State:
+class State(object):
 
     def __init__(self, page=None, url=None, form=None):
         self.page = page
@@ -79,11 +228,19 @@ class State:
 
 class Browser(object):
 
-    def __init__(self, session=None, *args, **kwargs):
-        super(Browser, self).__init__(*args, **kwargs)
+    def __init__(self, session=None, args=None, **kwargs):
+        super(Browser, self).__init__(**kwargs)
+
+        browser_args = ["--no-sandbox", '--user-agent=Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1']
+
+        if args:
+            for key, value in args.items():
+                command = f'{key}={value}'
+                browser_args.append(command)
+
         self.soup_parser = {'features': 'html5lib'}
         self.session = session or requests.Session()
-        self.js_session = HTMLSession(browser_args=["--no-sandbox", '--user-agent=Mozilla/5.0 (Windows NT 5.1; rv:7.0.1) Gecko/20100101 Firefox/7.0.1'])
+        self.js_session = HTMLSession(browser_args=browser_args)
         self.state = State()
         self.headers = self.get_headers()
         self.proxies = None
@@ -133,16 +290,16 @@ class Browser(object):
         return forms
 
     def select_form(self, selector="form", nr=0):
-        current_page = self.state.page
-        found_forms = current_page.select(selector, limit=nr + 1)
-
         if isinstance(selector, bs4.element.Tag):
+            if selector.name != "form":
+                return 'Error'
             self.state.form = Form(selector)
         else:
+            found_forms = self.get_current_page().select(selector, limit=nr + 1)
             if len(found_forms) != nr + 1:
-                self.state.form = []
-            else:
-                self.state.form = Form(found_forms[-1])
+                return 'Error'
+            self.state.form = Form(found_forms[-1])
+
         return self.get_current_form()
 
     def get_headers(self):
@@ -178,29 +335,36 @@ class Browser(object):
             parameter = args[0]
             self.js_session = HTMLSession(browser_args=parameter)
 
-    def open(self, url, referer=None, proxies=None, verify=None, is_javascript=False):
+    def send_request(self, method, url, **kwargs):
+        response = self.session.request(method, url, **kwargs)
+        if response.status_code == 200:
+            return response
+
+        return None
+
+    def open(self, url, referer=None, proxies=None, verify=None, is_javascript=False, **kwargs):
         if verify is not None:
             self.verify = verify
-        if proxies:
-            self.proxies = proxies
-        else:
-            proxies = self.proxies
+
         if referer is not None:
             self.headers['referer'] = self.get_current_url() or referer
 
         if is_javascript:
             self.set_enable_js()
-            response = self.session.get(url)
-            response.html.render(send_cookies_session=True)
-            self.state = State(page=self.format_html(response.html.html), url=response.html.url)
-            return self.format_html(response.html.html)
+            response = self.send_request('GET', url)
+            response.html.render()
+            self.state.page = self.format_html(response.html.html)
+            self.state.url = response.html.url
+            return self.state.page
         else:
-            response = self.session.get(url, headers=self.headers, proxies=proxies, verify=verify)
-            self.state = State(page=self.format_html(response.text), url=response.url)
-            return self.format_html(response.text)
+            response = self.send_request('GET', url, headers=self.headers, proxies=proxies, verify=verify, **kwargs)
+            self.state.page = self.format_html(response.text)
+            self.state.url = response.url
+            return self.state.page
 
     def open_custom_page(self, page_text, url=None):
-        self.state = State(page=self.format_html(page_text), url=url)
+        self.state.page = self.format_html(page_text)
+        self.state.url = url
 
     def format_html(self, response, soup_config=None):
         self.soup_parser = soup_config or self.soup_parser
@@ -212,13 +376,16 @@ class Browser(object):
             html = page
         else:
             html = str(self.state.page)
+
         with tempfile.NamedTemporaryFile('w', delete=False, suffix='.html') as f:
             url = 'file://' + f.name
             f.write(html)
         webbrowser.open(url)
 
-    def submit(self, update_state=True, is_javascript=False, script=None, **kwargs):
+    def submit(self, btn_name=None, update_state=True, is_javascript=False, script=None, **kwargs):
         referer = self.get_current_url()
+        if btn_name:
+            self.get_current_form().choose_submit(btn_name)
         if referer is not None:
             headers = self.get_headers()
             headers['referer'] = referer
@@ -226,24 +393,26 @@ class Browser(object):
             headers = self.get_headers()
 
         if kwargs:
-            response_get = self.session.get(self.state.url)
+            response_get = self.send_request('GET', self.state.url, headers=headers)
             self.state.form = self.format_form(response_get.text, kwargs)
             response = self.click(self.state.form, is_javascript=is_javascript, url=self.state.url, script=script)
         else:
             response = self.click(self.state.form, is_javascript=is_javascript, url=self.state.url, script=script)
 
         if update_state:
-            self.state = State(page=self.format_html(response.text), url=response.url)
-        return self.format_html(response.text)
+            if is_javascript:
+                self.response = self.format_html(response.html)
+            else:
+                self.response = self.format_html(response.text)
+            self.state.page = self.response
+            self.state.url = response.url
+        return self.response
 
     def click(self, form, is_javascript=False, url=None, script=None):
         if isinstance(form, Form):
             form = form.form
-        response = self.send(self.session, form, url, is_javascript=is_javascript, script=script)
+        response = self.send(form, url, is_javascript=is_javascript, script=script)
         return response
-
-    def response(self):
-        return self.format_html(self.response)
 
     def get_current_url(self):
         return self.state.url
@@ -259,12 +428,16 @@ class Browser(object):
     def find_link(self, url_regex=None, link_text=None, real_link=False, *args, **kwargs):
         all_links = self.get_current_page().find_all(
             'a', href=True, *args, **kwargs)
+
         if url_regex is not None:
             all_links = [a for a in all_links
                          if re.search(url_regex, a['href'])]
         if link_text is not None:
             all_links = [a for a in all_links
                          if a.text == link_text]
+        elif len(all_links) == 0:
+            link = self.get_current_page().find('form')['action']
+            return {"href": link}
 
         links = all_links
 
@@ -275,6 +448,23 @@ class Browser(object):
                 return links[0]['href']
             else:
                 return links[0]
+
+    def find_link_internal(self, link, args, kwargs):
+        if hasattr(link, 'attrs') and 'href' in link.attrs:
+            return link
+
+        if link and 'url_regex' in kwargs:
+            raise ValueError('link parameter cannot be treated as '
+                             'url_regex because url_regex is already '
+                             'present in keyword arguments')
+        elif link:
+            kwargs['url_regex'] = link
+
+            return self.find_link(*args, **kwargs)
+
+    def follow_link(self, link=None, *args, **kwargs):
+        link = self.find_link_internal(link, args, kwargs)
+        return self.open_relative(link['href'])
 
     def format_form(self, page, data):
         soup = self.format_html(page)
@@ -312,7 +502,7 @@ class Browser(object):
                         url_captcha = '/'.join(self.state.url.split('/')[start:end]) + '/' + query['src']
         return url_captcha
 
-    def send(self, session, form, url, is_javascript=False, script=None,  **kwargs):
+    def send(self, form, url, is_javascript=False, script=None, **kwargs):
         method = str(form.get("method", "get"))
         action = form.get("action")
         parse_url = urllib.parse.urljoin(url, action)
@@ -385,7 +575,9 @@ class Browser(object):
             class DictThatReturnsTrue(dict):
                 def __bool__(self):
                     return True
+
                 __nonzero__ = __bool__
+
             files = DictThatReturnsTrue()
 
         if self.debug:
@@ -396,8 +588,9 @@ class Browser(object):
             self.debug = result_dict
 
         if is_javascript:
-            response = session.request(method=method, url=url, files=files, **kwargs)
-            response.html.render(script=script, keep_page=True, timeout=0, reload=False, send_cookies_session=True)
-            return response
+            self.set_enable_js()
+            response = self.send_request(method=method, url=url, files=files, **kwargs)
+            response.html.render(script=script, keep_page=True, timeout=0, reload=False)
+            return response.html
         else:
-            return session.request(method=method, url=url, files=files, **kwargs)
+            return self.send_request(method=method, url=url, files=files, **kwargs)
