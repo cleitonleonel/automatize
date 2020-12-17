@@ -342,7 +342,7 @@ class Browser(object):
 
         return None
 
-    def open(self, url, referer=None, proxies=None, verify=None, is_javascript=False, **kwargs):
+    def open(self, url, referer=None, proxies=None, verify=None, is_javascript=False, script=None, **kwargs):
         if verify is not None:
             self.verify = verify
 
@@ -352,7 +352,7 @@ class Browser(object):
         if is_javascript:
             self.set_enable_js()
             response = self.send_request('GET', url)
-            response.html.render()
+            response.html.render(script=script)
             self.state.page = self.format_html(response.html.html)
             self.state.url = response.html.url
             return self.state.page
