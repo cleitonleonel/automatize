@@ -337,7 +337,7 @@ class Browser(object):
 
     def send_request(self, method, url, **kwargs):
         response = self.session.request(method, url, **kwargs)
-        if response.status_code == 200:
+        if response.status_code in [200, 302]:
             return response
 
         return None
@@ -589,6 +589,7 @@ class Browser(object):
 
         if is_javascript:
             self.set_enable_js()
+            print(url)
             response = self.send_request(method=method, url=url, files=files, **kwargs)
             response.html.render(script=script, keep_page=True, timeout=0, reload=False)
             return response.html
