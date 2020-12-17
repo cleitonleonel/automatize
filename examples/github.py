@@ -11,8 +11,8 @@ browser.select_form('#login form')
 
 # print(browser.get_current_form().form)
 
-browser["login"] = "cleitonleonel"
-browser["password"] = "98651597a"
+browser["login"] = ""
+browser["password"] = ""
 
 resp = browser.submit(is_javascript=True)
 
