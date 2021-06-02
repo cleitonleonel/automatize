@@ -23,7 +23,7 @@ six==1.15.0
 soupsieve==2.1
 sqlparse==0.4.1
 tqdm==4.54.1
-urllib3==1.26.2
+urllib3==1.26.5
 w3lib==1.22.0
 webencodings==0.5.1
 websockets==8.1
