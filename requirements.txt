@@ -26,4 +26,4 @@ tqdm==4.54.1
 urllib3==1.26.2
 w3lib==1.22.0
 webencodings==0.5.1
-websockets==8.1
+websockets==9.1
