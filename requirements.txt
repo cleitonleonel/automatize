@@ -10,7 +10,7 @@ fake-useragent==0.1.11
 html5lib==1.1
 idna==2.10
 image==1.5.33
-lxml==4.6.2
+lxml==4.6.5
 parse==1.18.0
 Pillow==8.0.1
 pyee==7.0.4
