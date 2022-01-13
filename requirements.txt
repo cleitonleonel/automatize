@@ -12,7 +12,7 @@ idna==2.10
 image==1.5.33
 lxml==4.6.2
 parse==1.18.0
-Pillow==8.0.1
+Pillow==9.0.0
 pyee==7.0.4
 pyppeteer==0.2.2
 pyquery==1.4.3
